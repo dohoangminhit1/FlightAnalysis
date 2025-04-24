@@ -1,0 +1,10 @@
+# ./spark-apps/requirements.txt or ./kafka-producer/requirements.txt
+kafka-python
+pandas # To easily read the CSV
+jupyterlab
+notebook 
+pandas 
+elasticsearch 
+matplotlib 
+seaborn
+plotly
