@@ -1,0 +1,195 @@
+version: '3.8'
+
+networks:
+  lambda-net:
+    driver: bridge
+
+services:
+  # --- Zookeeper (Giữ nguyên) ---
+  zookeeper:
+    image: confluentinc/cp-zookeeper:5.3.7 # Version này ổn định, không cần thay đổi trừ khi có lý do cụ thể
+    container_name: zookeeper
+    hostname: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_SERVER_ID: 1
+    ports:
+      - "2181:2181"
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-log:/var/lib/zookeeper/log
+    networks:
+      - lambda-net
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo 'ruok' | nc localhost 2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --- Kafka (Giữ nguyên) ---
+  kafka:
+    image: confluentinc/cp-kafka:5.3.7 # Version này ổn định, không cần thay đổi trừ khi có lý do cụ thể
+    container_name: kafka
+    hostname: kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    ports:
+      - "29092:29092"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks:
+      - lambda-net
+
+  # --- Hadoop (Giữ nguyên) ---
+  hadoop-namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: hadoop-namenode
+    hostname: hadoop-namenode
+    environment:
+      - CLUSTER_NAME=hadoop-cluster
+      - CORE_CONF_fs_defaultFS=hdfs://hadoop-namenode:9000
+      - CORE_CONF_hadoop_http_staticuser_user=root
+      - HDFS_CONF_dfs_webhdfs_enabled=true
+      - HDFS_CONF_dfs_permissions_enabled=false
+      - HDFS_CONF_dfs_namenode_datanode_registration_ip-hostname-check=false
+    ports:
+      - "9870:9870"
+      - "9000:9000"
+    volumes:
+      - hadoop-namenode:/hadoop/dfs/name
+    networks:
+      - lambda-net
+    healthcheck:
+        test: ["CMD", "curl", "-f", "http://localhost:9870"]
+        interval: 30s
+        timeout: 10s
+        retries: 5
+
+  hadoop-datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: hadoop-datanode
+    hostname: hadoop-datanode
+    depends_on:
+      hadoop-namenode:
+         condition: service_healthy
+    environment:
+      - CLUSTER_NAME=hadoop-cluster
+      - CORE_CONF_fs_defaultFS=hdfs://hadoop-namenode:9000
+      - SERVICE_PRECONDITION=hadoop-namenode:9870
+      - HDFS_CONF_dfs_datanode_data_dir=/hadoop/dfs/data
+    ports:
+      - "9864:9864"
+    volumes:
+      - hadoop-datanode:/hadoop/dfs/data
+      - ./data:/data # Keep local mount if needed
+    networks:
+      - lambda-net
+
+  # --- Spark (Giữ nguyên) ---
+  spark-master:
+    image: bitnami/spark:3.5.3 # Có thể hạ xuống 3.2.x hoặc 3.3.x nếu cần tương thích ES 7.x tốt hơn, nhưng 3.5.3 vẫn nên hoạt động
+    container_name: spark-master
+    hostname: spark-master
+    environment:
+      - SPARK_MODE=master
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+      - JAVA_HOME=/opt/bitnami/java
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+    volumes:
+      - ./spark-apps:/opt/bitnami/spark/apps
+      - ./data:/opt/bitnami/spark/data
+    networks:
+      - lambda-net
+
+  spark-worker:
+    image: bitnami/spark:3.5.3 # Giữ đồng bộ với spark-master
+    container_name: spark-worker-1
+    hostname: spark-worker-1
+    depends_on:
+      - spark-master
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+      - SPARK_WORKER_MEMORY=1G
+      - SPARK_WORKER_CORES=1
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+      - JAVA_HOME=/opt/bitnami/java
+    volumes:
+      - ./spark-apps:/opt/bitnami/spark/apps
+      - ./data:/opt/bitnami/spark/data
+    ports:
+      - "8081:8081"
+    networks:
+      - lambda-net
+
+  # --- Elasticsearch (Phiên bản 8.14.1) ---
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.14.1
+    container_name: elasticsearch
+    hostname: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false # Disable security for easier setup
+      - "ES_JAVA_OPTS=-Xms750m -Xmx750m" # Limit RAM usage
+    ports:
+      - "9200:9200" # HTTP API
+      - "9300:9300" # Transport (optional for single-node)
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    networks:
+      - lambda-net
+    healthcheck:
+      test: curl -s http://localhost:9200 >/dev/null || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.14.1
+    container_name: kibana
+    hostname: kibana
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    networks:
+      - lambda-net
+    healthcheck:
+      test: curl -s http://localhost:5601/api/status | grep -q '"level":"available"' || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  zookeeper-data:
+  zookeeper-log:
+  kafka-data:
+  hadoop-namenode:
+  hadoop-datanode:
+  elasticsearch-data:
