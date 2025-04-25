@@ -1,0 +1,39 @@
+# Dockerfile.spark (Sử dụng COPY)
+
+# Sử dụng image Bitnami Spark gốc làm base
+FROM bitnami/spark:3.5.3
+
+# === Giai đoạn 1: Sao chép các file cần thiết ===
+
+# Sao chép file requirements.txt vào một vị trí tạm trong image
+# Đảm bảo file 'requirements.txt' tồn tại cùng cấp với Dockerfile
+COPY requirements.txt /tmp/requirements.txt
+
+# Sao chép file JAR của Elasticsearch-Hadoop từ thư mục jars cục bộ
+# Đảm bảo thư mục 'jars' chứa file này tồn tại cùng cấp với Dockerfile
+COPY ./jars/elasticsearch-spark-30_2.12-8.14.1.jar /opt/bitnami/spark/jars/
+
+
+# === Giai đoạn 2: Cài đặt dependencies ===
+
+# Chuyển sang user root để cài đặt qua apt (Bitnami thường chạy non-root)
+USER root
+
+# Cài đặt các gói Python và dọn dẹp
+RUN set -eux; \
+    mkdir -p /var/lib/apt/lists/partial; \
+    apt-get update; \
+    # Cài pip nếu chưa có (thường Bitnami image đã có)
+    if ! command -v pip3 &> /dev/null; then \
+        apt-get install -y --no-install-recommends python3-pip; \
+    fi; \
+    # Cài đặt từ requirements.txt đã copy vào /tmp
+    pip3 install --no-cache-dir -r /tmp/requirements.txt; \
+    # Dọn dẹp apt cache và file requirements tạm
+    apt-get clean; \
+    rm -rf /var/lib/apt/lists/* /tmp/requirements.txt
+
+# Chuyển về user mặc định của Bitnami (thường là 1001)
+USER 1001
+
+# KHÔNG cần ENV SPARK_EXTRA_CLASSPATH vì Spark tự đọc thư mục jars

@@ -1,13 +1,18 @@
-version: '3.8'
-
 networks:
   lambda-net:
     driver: bridge
 
+volumes:
+  zookeeper-data:
+  zookeeper-log:
+  kafka-data:
+  hadoop-namenode:
+  hadoop-datanode:
+  elasticsearch-data:
+
 services:
-  # --- Zookeeper (Giữ nguyên) ---
   zookeeper:
-    image: confluentinc/cp-zookeeper:5.3.7 # Version này ổn định, không cần thay đổi trừ khi có lý do cụ thể
+    image: confluentinc/cp-zookeeper:5.3.7
     container_name: zookeeper
     hostname: zookeeper
     environment:
@@ -27,9 +32,8 @@ services:
       timeout: 5s
       retries: 5
 
-  # --- Kafka (Giữ nguyên) ---
   kafka:
-    image: confluentinc/cp-kafka:5.3.7 # Version này ổn định, không cần thay đổi trừ khi có lý do cụ thể
+    image: confluentinc/cp-kafka:5.3.7
     container_name: kafka
     hostname: kafka
     depends_on:
@@ -53,7 +57,6 @@ services:
     networks:
       - lambda-net
 
-  # --- Hadoop (Giữ nguyên) ---
   hadoop-namenode:
     image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
     container_name: hadoop-namenode
@@ -73,10 +76,10 @@ services:
     networks:
       - lambda-net
     healthcheck:
-        test: ["CMD", "curl", "-f", "http://localhost:9870"]
-        interval: 30s
-        timeout: 10s
-        retries: 5
+      test: ["CMD", "curl", "-f", "http://localhost:9870"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
 
   hadoop-datanode:
     image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
@@ -84,7 +87,7 @@ services:
     hostname: hadoop-datanode
     depends_on:
       hadoop-namenode:
-         condition: service_healthy
+        condition: service_healthy
     environment:
       - CLUSTER_NAME=hadoop-cluster
       - CORE_CONF_fs_defaultFS=hdfs://hadoop-namenode:9000
@@ -94,13 +97,15 @@ services:
       - "9864:9864"
     volumes:
       - hadoop-datanode:/hadoop/dfs/data
-      - ./data:/data # Keep local mount if needed
+      - ./data:/data
     networks:
       - lambda-net
 
-  # --- Spark (Giữ nguyên) ---
   spark-master:
-    image: bitnami/spark:3.5.3 # Có thể hạ xuống 3.2.x hoặc 3.3.x nếu cần tương thích ES 7.x tốt hơn, nhưng 3.5.3 vẫn nên hoạt động
+    build:
+      context: .
+      dockerfile: Dockerfile.spark
+    image: custom-spark:es # Giữ lại tên image là tốt
     container_name: spark-master
     hostname: spark-master
     environment:
@@ -110,6 +115,7 @@ services:
       - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
       - SPARK_SSL_ENABLED=no
       - JAVA_HOME=/opt/bitnami/java
+      # - SPARK_EXTRA_CLASSPATH=/opt/bitnami/spark/jars/elasticsearch-spark-30_2.12-8.14.1.jar # <--- XÓA DÒNG NÀY
     ports:
       - "8080:8080"
       - "7077:7077"
@@ -121,7 +127,10 @@ services:
       - lambda-net
 
   spark-worker:
-    image: bitnami/spark:3.5.3 # Giữ đồng bộ với spark-master
+    build:
+      context: .
+      dockerfile: Dockerfile.spark
+    image: custom-spark:es # Giữ lại tên image là tốt
     container_name: spark-worker-1
     hostname: spark-worker-1
     depends_on:
@@ -136,6 +145,7 @@ services:
       - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
       - SPARK_SSL_ENABLED=no
       - JAVA_HOME=/opt/bitnami/java
+      # - SPARK_EXTRA_CLASSPATH=/opt/bitnami/spark/jars/elasticsearch-spark-30_2.12-8.14.1.jar # <--- XÓA DÒNG NÀY
     volumes:
       - ./spark-apps:/opt/bitnami/spark/apps
       - ./data:/opt/bitnami/spark/data
@@ -145,18 +155,17 @@ services:
     networks:
       - lambda-net
 
-  # --- Elasticsearch (Phiên bản 8.14.1) ---
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.14.1
     container_name: elasticsearch
     hostname: elasticsearch
     environment:
       - discovery.type=single-node
-      - xpack.security.enabled=false # Disable security for easier setup
-      - "ES_JAVA_OPTS=-Xms750m -Xmx750m" # Limit RAM usage
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms750m -Xmx750m"
     ports:
-      - "9200:9200" # HTTP API
-      - "9300:9300" # Transport (optional for single-node)
+      - "9200:9200"
+      - "9300:9300"
     volumes:
       - elasticsearch-data:/usr/share/elasticsearch/data
     networks:
@@ -187,11 +196,3 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
-
-volumes:
-  zookeeper-data:
-  zookeeper-log:
-  kafka-data:
-  hadoop-namenode:
-  hadoop-datanode:
-  elasticsearch-data:
