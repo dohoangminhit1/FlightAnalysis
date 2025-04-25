@@ -1,0 +1,2 @@
+docker cp flight_visualizer.py spark-master:/tmp/flight_visualizer.py
+docker exec spark-master spark-submit /tmp/flight_visualizer.py

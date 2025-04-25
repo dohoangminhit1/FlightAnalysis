@@ -116,6 +116,7 @@ services:
     volumes:
       - ./spark-apps:/opt/bitnami/spark/apps
       - ./data:/opt/bitnami/spark/data
+      - ./requirements.txt:/opt/bitnami/spark/requirements.txt
     networks:
       - lambda-net
 
@@ -138,6 +139,7 @@ services:
     volumes:
       - ./spark-apps:/opt/bitnami/spark/apps
       - ./data:/opt/bitnami/spark/data
+      - ./requirements.txt:/opt/bitnami/spark/requirements.txt
     ports:
       - "8081:8081"
     networks:

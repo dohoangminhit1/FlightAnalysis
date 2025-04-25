@@ -1,0 +1,7 @@
+1. Data Ingestion
+2. Data Processing: Spark batch job
+/opt/bitnami/spark/bin/spark-submit \
+  --master spark://spark-master:7077 \
+  --deploy-mode client \
+  # --jars elasticsearch-spark-30_2.12 # Alternative if packages doesn't work
+  /opt/bitnami/spark/apps/process_flights.py
